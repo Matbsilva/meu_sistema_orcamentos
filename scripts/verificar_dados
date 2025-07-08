@@ -1,0 +1,50 @@
+# scripts/verificar_dados.py
+import sqlite3
+import pandas as pd
+from pathlib import Path
+
+# Aponta para o caminho correto do banco de dados
+DB_PATH = Path(__file__).resolve().parent.parent / "data" / "orcamentos.db"
+
+def inspecionar_mapeamento_demolicao():
+    """
+    Função para verificar especificamente como os itens de demolição
+    estão sendo mapeados no banco de dados.
+    """
+    if not DB_PATH.exists():
+        print("Arquivo de banco de dados não encontrado em:", DB_PATH)
+        return
+
+    print("--- Inspecionando Mapeamento de Itens de Demolição ---")
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        
+        # Query que busca todos os itens que contêm "Demolição" na descrição
+        # e mostra a qual item_padrao eles estão associados.
+        query = """
+        SELECT
+            i.descricao,
+            i.nome_obra,
+            m.item_padrao
+        FROM
+            itens_orcamento AS i
+        LEFT JOIN
+            mapa_itens AS m ON i.descricao = m.descricao_original
+        WHERE
+            i.descricao LIKE '%Demolição%'
+        """
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        
+        if df.empty:
+            print("Nenhum item com a palavra 'Demolição' foi encontrado no banco de dados.")
+        else:
+            # Imprime o resultado de forma legível
+            print(df.to_string())
+
+    except Exception as e:
+        print(f"Ocorreu um erro ao acessar o banco de dados: {e}")
+
+if __name__ == "__main__":
+    inspecionar_mapeamento_demolicao()

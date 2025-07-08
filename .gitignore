@@ -1,0 +1,9 @@
+# Ambiente Virtual
+.venv/
+
+# Banco de Dados Local
+data/orcamentos.db
+
+# Arquivos de Cache do Python
+__pycache__/
+*.pyc

@@ -1,0 +1,124 @@
+# 1_Dashboard.py
+import streamlit as st
+import pandas as pd
+from scripts import processador
+
+# --- Configuração da Página ---
+st.set_page_config(page_title="SIO | Dashboard de Análise", layout="wide")
+
+# --- Carregar Dados ---
+@st.cache_data
+def carregar_dados_mapeados():
+"""Carrega os itens já com a coluna de mapeamento 'item_padrao'."""
+return processador.consultar_itens_com_mapeamento()
+
+df_completo = carregar_dados_mapeados()
+
+# --- Título e Interface Principal ---
+st.title(" Dashboard de Análise de Itens")
+st.markdown("Use esta tela para analisar o histórico de preços e serviços.")
+
+if df_completo.empty:
+st.warning("Nenhum dado encontrado no banco. Comece importando orçamentos na página 'Assistente de Importação'.")
+st.stop()
+
+# --- Barra de Pesquisa ---
+st.header("Pesquisa de Serviço")
+termo_pesquisa = st.text_input(
+"Digite uma palavra-chave para buscar um serviço (ex: 'escavação', 'concreto', 'piso')",
+placeholder="Buscar..."
+)
+
+# Filtra o dataframe com base na pesquisa por texto
+if termo_pesquisa:
+# ATENÇÃO: Esta lógica ainda usa a 'descricao' original. Vamos mudar isso em breve.
+df_pesquisa = df_completo[df_completo['descricao'].str.contains(termo_pesquisa, case=False, na=False)]
+else:
+df_pesquisa = df_completo.copy()
+
+# --- Menu de Seleção para Refinar a Análise ---
+st.header("Refinar Análise")
+# ATENÇÃO: Esta lógica ainda usa a 'descricao' original. Vamos mudar isso em breve.
+lista_descricoes = df_pesquisa['descricao'].unique().tolist()
+OPCAO_TODOS = "-- Analisar todos os itens encontrados --"
+lista_descricoes.insert(0, OPCAO_TODOS)
+item_selecionado = st.selectbox(
+"Para ver as estatísticas de um item específico, selecione-o abaixo:",
+options=lista_descricoes
+)
+
+if item_selecionado == OPCAO_TODOS:
+df_final = df_pesquisa.copy()
+else:
+df_final = df_pesquisa[df_pesquisa['descricao'] == item_selecionado]
+
+# Limpa o prefixo do nome do arquivo para melhor visualização
+if 'arquivo_original' in df_final.columns:
+df_final = df_final.copy()
+df_final.loc[:, 'arquivo_original'] = df_final['arquivo_original'].str.replace("GEFORCE - ", "", regex=False)
+
+# --- Tabela de Dados para Seleção ---
+df_para_exibicao = df_final.copy()
+
+st.header("Itens da Seleção")
+if not df_para_exibicao.empty:
+df_para_exibicao.insert(0, "selecionar", False)
+st.info("Para ver as estatísticas de uma ou mais linhas, marque as caixas de seleção correspondentes.")
+
+df_editado = st.data_editor(
+df_para_exibicao,
+column_config={
+"selecionar": st.column_config.CheckboxColumn("Selecionar", required=True),
+"id": st.column_config.Column("ID", width="small"),
+"item_padrao": st.column_config.Column("Item Padrão", width="large"),
+"descricao": st.column_config.Column("Descrição Original", width="large"),
+"nome_obra": st.column_config.Column("Obra", width="medium"),
+"arquivo_original": st.column_config.Column("Arquivo", width="medium"),
+"valor_unitario": st.column_config.NumberColumn("Valor Unitário", format="R$ %.2f"),
+"valor_total": st.column_config.NumberColumn("Valor Total", format="R$ %.2f"),
+"importado_em": st.column_config.DatetimeColumn("Importado em", format="D/MM/YYYY", width="small")
+},
+column_order=["selecionar", "item_padrao", "descricao", "nome_obra", "unidade", "quantidade", "valor_unitario", "valor_total", "importado_em", "arquivo_original"],
+hide_index=True,
+disabled=df_para_exibicao.columns.drop("selecionar")
+)
+df_selecionado = df_editado[df_editado['selecionar']]
+else:
+st.write("Nenhum item encontrado para os filtros aplicados.")
+df_selecionado = pd.DataFrame()
+
+
+# --- CÁLCULO E EXIBIÇÃO DAS ESTATÍSTICAS ---
+st.header("Estatísticas da Seleção")
+st.markdown("As estatísticas abaixo refletem os itens marcados na tabela acima. Se nada for marcado, refletem todos os itens encontrados na busca.")
+
+if not df_selecionado.empty:
+df_para_stats = df_selecionado
+else:
+df_para_stats = df_final
+
+if not df_para_stats.empty:
+preco_medio = df_para_stats['valor_unitario'].mean()
+preco_mediana = df_para_stats['valor_unitario'].median()
+preco_minimo = df_para_stats['valor_unitario'].min()
+preco_maximo = df_para_stats['valor_unitario'].max()
+num_registros = len(df_para_stats)
+f_preco_medio = f"R$ {preco_medio:,.2f}"
+f_preco_mediana = f"R$ {preco_mediana:,.2f}"
+f_preco_minimo = f"R$ {preco_minimo:,.2f}"
+f_preco_maximo = f"R$ {preco_maximo:,.2f}"
+else:
+f_preco_medio, f_preco_mediana, f_preco_minimo, f_preco_maximo = "N/A", "N/A", "N/A", "N/A"
+num_registros = 0
+
+col1, col2, col3, col4, col5 = st.columns(5)
+with col1:
+st.metric(label="Preço Médio", value=f_preco_medio)
+with col2:
+st.metric(label="Mediana", value=f_preco_mediana)
+with col3:
+st.metric(label="Preço Mínimo", value=f_preco_minimo)
+with col4:
+st.metric(label="Preço Máximo", value=f_preco_maximo)
+with col5:
+st.metric(label="Nº de Registros", value=num_registros)
