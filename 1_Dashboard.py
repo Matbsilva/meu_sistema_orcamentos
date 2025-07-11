@@ -6,6 +6,41 @@ from scripts import processador
 
 st.set_page_config(page_title="SIO | Dashboard de Análise", layout="wide")
 
+# --- Lógica do Botão de Limpeza ---
+if 'confirmando_limpeza' not in st.session_state:
+    st.session_state.confirmando_limpeza = False
+
+def ativar_confirmacao():
+    st.session_state.confirmando_limpeza = True
+
+def desativar_confirmacao():
+    st.session_state.confirmando_limpeza = False
+
+def executar_limpeza():
+    if processador.limpar_historico_precos():
+        st.success("Histórico de preços apagado com sucesso!")
+        st.cache_data.clear()
+    else:
+        st.error("Ocorreu um erro ao tentar apagar o histórico.")
+    desativar_confirmacao()
+    st.rerun()
+
+# --- Interface ---
+st.title("📊 Dashboard de Análise de Itens")
+st.markdown("Use esta tela para analisar o histórico de preços e serviços por obra e cliente.")
+
+# --- Bloco de Gerenciamento de Dados (AGORA NO TOPO) ---
+with st.expander("Opções de Gerenciamento de Dados"):
+    st.button("Limpar Histórico de Preços", on_click=ativar_confirmacao, use_container_width=True, help="Apaga todos os orçamentos importados para começar do zero.")
+    if st.session_state.confirmando_limpeza:
+        st.warning("**ATENÇÃO:** Você tem certeza que deseja apagar TODO o histórico de preços de venda? Esta ação é irreversível.")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.button("Sim, apagar todo o histórico", on_click=executar_limpeza, type="primary", use_container_width=True)
+        with col2:
+            st.button("Cancelar", on_click=desativar_confirmacao, use_container_width=True)
+
+# --- Carregamento de Dados (AGORA DEPOIS DO BOTÃO)---
 @st.cache_data
 def carregar_dados_mapeados():
     """Carrega os itens já com as colunas de mapeamento e cliente."""
@@ -13,14 +48,12 @@ def carregar_dados_mapeados():
 
 df_completo = carregar_dados_mapeados()
 
-st.title("📊 Dashboard de Análise de Itens")
-st.markdown("Use esta tela para analisar o histórico de preços e serviços por obra e cliente.")
-
+# A verificação agora acontece depois que o botão já foi desenhado
 if df_completo.empty:
-    st.warning("Nenhum dado encontrado no banco. Comece importando orçamentos na página 'Assistente de Importação'.")
+    st.warning("Nenhum dado de preço encontrado no banco. Comece importando orçamentos na página 'Assistente de Importação'.")
     st.stop()
 
-# --- Filtros e Pesquisa ---
+# --- O restante do Dashboard (só aparece se houver dados) ---
 st.header("Pesquisa e Filtros")
 termo_pesquisa = st.text_input(
     "Digite uma palavra-chave para buscar um serviço (padrão ou original):",
@@ -49,11 +82,9 @@ if item_padrao_selecionado == OPCAO_TODOS:
 else:
     df_final = df_pesquisa[df_pesquisa['item_padrao'] == item_padrao_selecionado]
 
-# --- Gráfico de Histórico de Preços ---
 if item_padrao_selecionado != OPCAO_TODOS and not df_final.empty:
     st.subheader(f"Histórico de Preço para: {item_padrao_selecionado}")
     
-    # Adiciona o nome do cliente ao rótulo da obra para diferenciação no gráfico
     df_final['obra_cliente'] = df_final['nome_obra'] + " (" + df_final['nome_cliente'].fillna('N/A') + ")"
     
     max_valor = df_final['valor_unitario'].max()
@@ -72,7 +103,6 @@ if item_padrao_selecionado != OPCAO_TODOS and not df_final.empty:
     fig.update_layout(uniformtext_minsize=8, uniformtext_mode='hide')
     st.plotly_chart(fig, use_container_width=True)
 
-# --- Tabela de Dados Detalhada ---
 st.header("Itens da Seleção")
 df_para_exibicao = df_final.copy()
 
@@ -106,7 +136,6 @@ else:
     st.write("Nenhum item encontrado para os filtros aplicados.")
     df_selecionado = pd.DataFrame()
 
-# --- Métricas e Estatísticas ---
 st.header("Estatísticas da Seleção")
 st.markdown("As estatísticas abaixo refletem os itens marcados na tabela acima. Se nada for marcado, refletem todos os itens da busca atual.")
 
