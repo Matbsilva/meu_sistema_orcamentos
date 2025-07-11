@@ -5,6 +5,22 @@ from scripts import processador
 import time
 import unicodedata
 from fuzzywuzzy import process, fuzz
+import re
+
+# FUNÇÃO DE LIMPEZA CENTRALIZADA: Usada para cabeçalhos e valores
+def limpar_texto(texto):
+    """Remove acentos, caracteres especiais, converte para minúsculas e padroniza espaços."""
+    if not isinstance(texto, str):
+        return ""
+    # Converte para minúsculas e normaliza acentos
+    texto_normalizado = unicodedata.normalize('NFKD', texto.lower())
+    # Remove caracteres de acentuação
+    texto_sem_acentos = ''.join(c for c in texto_normalizado if not unicodedata.combining(c))
+    # Remove caracteres especiais, mantendo apenas letras, números e espaços
+    texto_limpo = re.sub(r'[^a-z0-9\s]', ' ', texto_sem_acentos)
+    # Normaliza espaços (remove múltiplos espaços, espaços no início/fim)
+    texto_final = " ".join(texto_limpo.split())
+    return texto_final if texto_final else ""
 
 st.set_page_config(page_title="SIO | Assistente de Importação", layout="wide")
 st.title(" 🚀 Assistente de Importação e Mapeamento")
@@ -20,11 +36,6 @@ def inicializar_estado_importacao():
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
-
-# Função de normalização para ser usada pelo FuzzyWuzzy
-def normalizar_texto(texto: str) -> str:
-    if not isinstance(texto, str): return ""
-    return unicodedata.normalize('NFKD', texto.lower()).encode('ascii', 'ignore').decode('utf-8').strip()
 
 # --- 1. Upload do Arquivo ---
 st.subheader("1. Envie o arquivo da planilha")
@@ -45,7 +56,9 @@ if uploaded_file:
     )
     st.markdown("---")
 
-    # --- FLUXO PARA PREÇO DE VENDA (ORÇAMENTO) - CÓDIGO RESTAURADO ---
+    # =========================================================================
+    # --- FLUXO PARA PREÇO DE VENDA (ORÇAMENTO) - CÓDIGO ORIGINAL INALTERADO ---
+    # =========================================================================
     if tipo_importacao == "Preço de Venda (Orçamento de Obra)":
         if 'df_import' not in st.session_state:
             try:
@@ -140,41 +153,68 @@ if uploaded_file:
                 inicializar_estado_importacao()
                 st.rerun()
 
-    # --- FLUXO PARA BASE DE CUSTOS ---
+    # =========================================================================
+    # --- FLUXO PARA BASE DE CUSTOS (LÓGICA CORRIGIDA E APRIMORADA) ---
+    # =========================================================================
     elif tipo_importacao == "Base de Custos":
         st.header("Importando Base de Custos")
-        
-        limpar_base = st.checkbox("Apagar base de custos existente antes de importar")
-        st.info("O sistema usará o grupo da planilha. Para itens sem grupo, a IA fará uma sugestão.")
+
+        limpar_base = st.checkbox("Apagar base de custos e mapeamentos existentes antes de importar")
+        st.info("O sistema tentará reconhecer o grupo da planilha. Para itens sem grupo ou não reconhecidos, a IA fará uma sugestão.")
 
         if 'df_custos' not in st.session_state:
             try:
                 df_bruto = pd.read_excel(uploaded_file)
+                st.write("**Debug**: Colunas lidas da planilha:", list(df_bruto.columns))  # Log de depuração
+
+                # Dicionário robusto para reconhecer vários nomes de colunas possíveis
                 mapa_colunas = {
-                    'item': 'item_padrao_nome', 'unidade de medida': 'unidade_de_medida',
+                    'item': 'item_padrao_nome', 'descricao': 'item_padrao_nome', 'descrição': 'item_padrao_nome',
+                    'unidade de medida': 'unidade_de_medida', 'unidade': 'unidade_de_medida', 'unid': 'unidade_de_medida',
                     'custo material': 'custo_material', 'custo m.o.': 'custo_mao_de_obra',
                     'homem hora profissional': 'homem_hora_profissional', 'homem hora ajudante': 'homem_hora_ajudante',
-                    'codigo composicao': 'codigo_composicao', 'nº manual': 'numero_manual',
-                    'peso item': 'peso_item', 'grupo': 'grupo'
+                    'codigo composicao': 'codigo_composicao', 'n manual': 'numero_manual', 'nº manual': 'numero_manual',
+                    'peso item': 'peso_item', 
+                    'grupo': 'grupo', 'grupo de servico': 'grupo', 'grupo composicao': 'grupo', 'grupo composição': 'grupo'
                 }
-                
-                colunas_normalizadas = {col: normalizar_texto(col) for col in df_bruto.columns}
-                df_renomeado_inicial = df_bruto.rename(columns=colunas_normalizadas)
-                df_renomeado_final = df_renomeado_inicial.rename(columns=mapa_colunas)
-                
-                if 'item_padrao_nome' not in df_renomeado_final.columns:
-                    st.error("Erro Crítico: A coluna 'ITEM' não foi encontrada na sua planilha.")
+
+                # Limpar cabeçalhos da planilha
+                colunas_limpas = {col: limpar_texto(col) for col in df_bruto.columns}
+                # Mapear cabeçalhos limpos para os nomes internos
+                colunas_mapeadas = {}
+                for col, col_limpa in colunas_limpas.items():
+                    for chave, valor in mapa_colunas.items():
+                        if col_limpa == limpar_texto(chave):
+                            colunas_mapeadas[col] = valor
+                            break
+                    else:
+                        colunas_mapeadas[col] = col  # Mantém o nome original se não houver correspondência
+
+                df_renomeado = df_bruto.rename(columns=colunas_mapeadas)
+                st.write("**Debug**: Colunas após mapeamento:", list(df_renomeado.columns))  # Log de depuração
+
+                if 'item_padrao_nome' not in df_renomeado.columns:
+                    st.error("Erro Crítico: A coluna 'ITEM' (ou similar) não foi encontrada na sua planilha.")
                     st.stop()
-                
-                st.session_state.df_custos = df_renomeado_final
+
+                # Limpar valores da coluna 'grupo' para evitar problemas com espaços ou caracteres invisíveis
+                if 'grupo' in df_renomeado.columns:
+                    df_renomeado['grupo'] = df_renomeado['grupo'].apply(lambda x: limpar_texto(str(x)) if pd.notna(x) else '')
+                    df_renomeado['grupo'] = df_renomeado['grupo'].replace('', pd.NA)
+                    st.write("**Debug**: Primeiros valores da coluna 'grupo' (após limpeza):", df_renomeado['grupo'].head().tolist())  # Log de depuração
+
+                st.session_state.df_custos = df_renomeado
                 st.session_state.mapeamento_grupos = {}
             except Exception as e:
                 st.error(f"Ocorreu um erro ao ler e preparar a planilha de custos: {e}")
                 st.stop()
-        
+
         grupos_e_descricoes = processador.obter_grupos_e_descricoes()
         lista_grupos = sorted(list(grupos_e_descricoes.keys()))
-        
+        grupos_limpos_map = {limpar_texto(g): g for g in lista_grupos}
+        lista_grupos_limpos = list(grupos_limpos_map.keys())
+        st.write("**Debug**: Grupos disponíveis no sistema (limpos):", lista_grupos_limpos)  # Log de depuração
+
         df_custos = st.session_state.df_custos
         has_grupo_column = 'grupo' in df_custos.columns
 
@@ -183,66 +223,59 @@ if uploaded_file:
             st.write(f"Encontrados {total_itens} itens para mapear.")
 
             for index, row in df_custos.iterrows():
-                item_nome = row['item_padrao_nome']
+                item_nome = str(row.get('item_padrao_nome', ''))
                 st.markdown(f"--- \n**Serviço:** `{item_nome}`")
 
                 grupo_final = None
-                if has_grupo_column and pd.notna(row.get('grupo')) and str(row.get('grupo')).strip():
-                    grupo_planilha = str(row.get('grupo')).strip()
-                    
-                    melhor_match = process.extractOne(
-                        grupo_planilha, 
-                        lista_grupos, 
-                        processor=normalizar_texto,
-                        scorer=fuzz.ratio
-                    )
-                    
-                    if melhor_match and melhor_match[1] >= 95:
-                        grupo_final = melhor_match[0]
-                
-                if grupo_final:
-                    st.success(f"Grupo reconhecido da planilha: **{grupo_final}** (Similaridade: {melhor_match[1]}%)")
-                    st.session_state.mapeamento_grupos[item_nome] = grupo_final
-                else:
-                    if has_grupo_column and pd.notna(row.get('grupo')) and str(row.get('grupo')).strip():
-                        st.warning(f"O grupo '{str(row.get('grupo')).strip()}' da planilha não foi reconhecido com alta confiança. Usando IA.")
 
-                    with st.spinner(f"Item {index+1}/{total_itens}: Consultando IA para sugestão..."):
-                        if item_nome not in st.session_state.mapeamento_grupos or not st.session_state.mapeamento_grupos.get(item_nome):
-                             sugestao_ia = processador.sugerir_grupo_para_item(item_nome, grupos_e_descricoes)
-                             st.session_state.mapeamento_grupos[item_nome] = sugestao_ia
-                    
+                if has_grupo_column and pd.notna(row.get('grupo')) and row.get('grupo').strip():
+                    grupo_planilha = str(row.get('grupo')).strip()
+                    grupo_planilha_limpo = limpar_texto(grupo_planilha)
+                    st.write(f"**Debug**: Grupo lido da planilha (limpo): `{grupo_planilha_limpo}`")  # Log de depuração
+                    melhor_match = process.extractOne(grupo_planilha_limpo, lista_grupos_limpos, scorer=fuzz.ratio)
+
+                    if melhor_match and melhor_match[1] >= 85:  # Reduzido de 90% para 85%
+                        grupo_final = grupos_limpos_map[melhor_match[0]]
+                        st.success(f"Grupo reconhecido da planilha: **{grupo_final}** (Similaridade: {melhor_match[1]}%)")
+                        st.write(f"**Debug**: Grupo correspondente encontrado: `{grupo_final}` (Similaridade: {melhor_match[1]}%)")  # Log de depuração
+                        st.session_state.mapeamento_grupos[item_nome] = grupo_final
+                    else:
+                        st.warning(f"O grupo '{grupo_planilha}' da planilha não foi reconhecido com alta confiança (Similaridade: {melhor_match[1] if melhor_match else 0}%). Usando IA para sugestão.")
+                        st.write(f"**Debug**: Motivo da não correspondência: Similaridade baixa ({melhor_match[1] if melhor_match else 0}%)")  # Log de depuração
+
+                if not grupo_final:
+                    if item_nome not in st.session_state.mapeamento_grupos or not st.session_state.mapeamento_grupos.get(item_nome):
+                        with st.spinner(f"Item {index+1}/{total_itens}: Consultando IA para sugestão..."):
+                            sugestao_ia = processador.sugerir_grupo_para_item(item_nome, grupos_e_descricoes)
+                            st.session_state.mapeamento_grupos[item_nome] = sugestao_ia
+                            st.write(f"**Debug**: Sugestão da IA para '{item_nome}': `{sugestao_ia}`")  # Log de depuração
                     sugestao_atual = st.session_state.mapeamento_grupos.get(item_nome)
                     if sugestao_atual:
                         st.info(f"Sugestão da IA: **{sugestao_atual}**")
-                    
                     try:
                         indice_sugerido = lista_grupos.index(sugestao_atual) if sugestao_atual in lista_grupos else 0
                     except (ValueError, TypeError):
-                        indice_sugerido = 0 
-
+                        indice_sugerido = 0
                     grupo_selecionado = st.selectbox(
-                        label="Corrija o grupo do serviço, se necessário:",
+                        "Corrija o grupo do serviço, se necessário:",
                         options=lista_grupos,
                         index=indice_sugerido,
                         key=f"grupo_{index}"
                     )
                     st.session_state.mapeamento_grupos[item_nome] = grupo_selecionado
-            
+
             st.markdown("---")
             submitted = st.form_submit_button("Concluir Mapeamento e Salvar Base de Custos", type="primary")
             if submitted:
                 with st.spinner("Processando e salvando..."):
-                    processador.salvar_custo_em_lote(
-                        df_custos=df_custos, 
-                        mapeamento_grupos=st.session_state.mapeamento_grupos, 
-                        limpar_base_existente=limpar_base
-                    )
-                    msg_final = f"Sucesso! {len(df_custos)} itens de custo foram salvos e associados aos seus grupos."
-                    if limpar_base:
-                        msg_final = "Base de custos anterior foi apagada. " + msg_final
-                    st.success(msg_final)
-                    st.cache_data.clear()
-                    time.sleep(4)
-                    inicializar_estado_importacao()
-                    st.rerun()
+                    try:
+                        st.write("**Debug**: Mapeamento final de grupos:", st.session_state.mapeamento_grupos)  # Log de depuração
+                        processador.salvar_custo_em_lote(df_custos=st.session_state.df_custos, mapeamento_grupos=st.session_state.mapeamento_grupos, limpar_base_existente=limpar_base)
+                        st.success(f"Sucesso! {len(st.session_state.df_custos)} itens de custo foram salvos.")
+                        st.balloons()
+                        st.cache_data.clear()
+                        time.sleep(4)
+                        inicializar_estado_importacao()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Ocorreu um erro ao salvar os dados: {e}")

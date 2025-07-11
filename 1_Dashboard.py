@@ -16,31 +16,41 @@ def ativar_confirmacao():
 def desativar_confirmacao():
     st.session_state.confirmando_limpeza = False
 
-def executar_limpeza():
-    if processador.limpar_historico_precos():
-        st.success("Histórico de preços apagado com sucesso!")
-        st.cache_data.clear()
+def executar_limpeza_geral():
+    """Chama a nova função de limpeza completa do processador."""
+    if processador.limpar_banco_de_dados_completo():
+        st.success("Limpeza geral do banco de dados concluída! A aplicação será recarregada.")
+        st.cache_data.clear() # Limpa o cache do Streamlit
     else:
-        st.error("Ocorreu um erro ao tentar apagar o histórico.")
+        st.error("Ocorreu um erro ao tentar limpar o banco de dados.")
+    
     desativar_confirmacao()
-    st.rerun()
+    st.rerun() # Força o recarregamento da página para refletir o estado limpo
 
 # --- Interface ---
 st.title("📊 Dashboard de Análise de Itens")
 st.markdown("Use esta tela para analisar o histórico de preços e serviços por obra e cliente.")
 
-# --- Bloco de Gerenciamento de Dados (AGORA NO TOPO) ---
+# --- Bloco de Gerenciamento de Dados (Área de Perigo) ---
 with st.expander("Opções de Gerenciamento de Dados"):
-    st.button("Limpar Histórico de Preços", on_click=ativar_confirmacao, use_container_width=True, help="Apaga todos os orçamentos importados para começar do zero.")
+    st.button(
+        "Reset Geral do Sistema", 
+        on_click=ativar_confirmacao, 
+        use_container_width=True, 
+        help="Apaga TODOS os dados (custos, preços, mapas, observações) para recomeçar do zero."
+    )
     if st.session_state.confirmando_limpeza:
-        st.warning("**ATENÇÃO:** Você tem certeza que deseja apagar TODO o histórico de preços de venda? Esta ação é irreversível.")
+        st.warning(
+            "**ATENÇÃO: AÇÃO IRREVERSÍVEL!** Você tem certeza que deseja apagar **TODOS** os dados do sistema? "
+            "Isso inclui todos os orçamentos, a base de custos, todos os mapeamentos e observações."
+        )
         col1, col2 = st.columns(2)
         with col1:
-            st.button("Sim, apagar todo o histórico", on_click=executar_limpeza, type="primary", use_container_width=True)
+            st.button("Sim, apagar TUDO e recomeçar", on_click=executar_limpeza_geral, type="primary", use_container_width=True)
         with col2:
             st.button("Cancelar", on_click=desativar_confirmacao, use_container_width=True)
 
-# --- Carregamento de Dados (AGORA DEPOIS DO BOTÃO)---
+# --- Carregamento de Dados ---
 @st.cache_data
 def carregar_dados_mapeados():
     """Carrega os itens já com as colunas de mapeamento e cliente."""
@@ -50,7 +60,7 @@ df_completo = carregar_dados_mapeados()
 
 # A verificação agora acontece depois que o botão já foi desenhado
 if df_completo.empty:
-    st.warning("Nenhum dado de preço encontrado no banco. Comece importando orçamentos na página 'Assistente de Importação'.")
+    st.info("ℹ️ Nenhum dado encontrado no banco. Comece importando orçamentos ou uma base de custos na página 'Assistente de Importação'.")
     st.stop()
 
 # --- O restante do Dashboard (só aparece se houver dados) ---

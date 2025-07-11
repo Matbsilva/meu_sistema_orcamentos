@@ -30,21 +30,37 @@ except Exception as e:
     print(f"ATENÇÃO: Erro na configuração do Gemini. A sugestão por IA não funcionará. Erro: {e}")
 
 
+# --- FUNÇÃO DE LIMPEZA GERAL (JÁ ESTÁ CORRETA) ---
+def limpar_banco_de_dados_completo():
+    _garantir_tabelas()
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        tabelas_para_limpar = ["itens_orcamento", "base_custos", "mapa_itens", "observacoes_obra"]
+        for tabela in tabelas_para_limpar:
+            print(f"Limpando tabela: {tabela}...")
+            cursor.execute(f"DELETE FROM {tabela}")
+        conn.commit()
+        print("Limpeza geral do banco de dados concluída com sucesso.")
+        return True
+    except Exception as e:
+        print(f"Erro ao executar a limpeza geral do banco de dados: {e}")
+        return False
+    finally:
+        if conn:
+            conn.close()
+
+
 # --- Funções de IA e Mapeamento Inteligente -------------------- #
 def sugerir_grupo_para_item(item_nome: str, grupos_e_descricoes: dict) -> str | None:
-    """Sugere o grupo mais provável para um item usando a IA do Gemini com um prompt aprimorado."""
     if not model:
         print("Modelo de IA não inicializado. Usando sugestão nula.")
         return None
-        
     if not item_nome or not grupos_e_descricoes:
         return None
-
-    time.sleep(4.1) 
-
+    time.sleep(1.1) # Reduzido para agilizar testes
     opcoes_formatadas = "\n".join([f"- {nome}: {desc}" for nome, desc in grupos_e_descricoes.items()])
     lista_nomes_grupos = list(grupos_e_descricoes.keys())
-
     prompt = f"""
     Você é um assistente de IA especialista em engenharia civil e orçamentos. Sua tarefa é classificar um determinado "Serviço" na "Categoria" mais adequada.
     **Exemplo 1:**
@@ -64,11 +80,9 @@ def sugerir_grupo_para_item(item_nome: str, grupos_e_descricoes: dict) -> str | 
     {opcoes_formatadas}
     **Categoria Correta:**
     """
-
     try:
         response = model.generate_content(prompt)
         sugestao = response.text.strip()
-        
         if sugestao in lista_nomes_grupos:
             print(f"Serviço: '{item_nome}' -> Sugestão IA: '{sugestao}'")
             return sugestao
@@ -79,7 +93,6 @@ def sugerir_grupo_para_item(item_nome: str, grupos_e_descricoes: dict) -> str | 
                 print(f"Fallback bem-sucedido para: '{melhor_match[0]}'")
                 return melhor_match[0]
             return None
-            
     except Exception as e:
         print(f"Erro ao chamar a IA para sugestão de grupo: {e}")
         return None
@@ -100,10 +113,7 @@ def encontrar_melhor_correspondencia(query: str, choices: list) -> tuple | None:
     return best_overall
 
 def sugerir_nome_obra_limpo(nome_arquivo: str) -> str:
-    termos_finais = [
-        'PLANILHA ORÇAMENTÁRIA', 'PLANILHA ORCAMENTARIA', 'ORÇAMENTO',
-        'ORCAMENTO', 'PROPOSTA', 'REVISAO', 'REVISÃO', 'VERSAO', 'VERSÃO', 'REV'
-    ]
+    termos_finais = ['PLANILHA ORÇAMENTÁRIA', 'PLANILHA ORCAMENTARIA', 'ORÇAMENTO', 'ORCAMENTO', 'PROPOSTA', 'REVISAO', 'REVISÃO', 'VERSAO', 'VERSÃO', 'REV']
     nome_obra = Path(nome_arquivo).stem
     nome_obra = re.sub(r"^(GEFORCE\s*-\s*)", "", nome_obra, flags=re.IGNORECASE).strip()
     nome_obra_upper = nome_obra.upper()
@@ -138,7 +148,6 @@ def preparar_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         if not isinstance(text, str): return ""
         text = unicodedata.normalize("NFKD", text.lower()).encode("ascii", "ignore").decode("utf-8")
         return re.sub(r"[\s-]+", "_", text.strip())
-
     def _parse_num(value):
         if pd.isna(value): return None
         if isinstance(value, (int, float)): return float(value)
@@ -152,14 +161,8 @@ def preparar_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             return float(s_value)
         except (ValueError, TypeError):
             return None
-
     df.columns = [_normalize_text(col) for col in df.columns]
-    rename_map = {
-        "item": "item", "descricao": "descricao", "desc": "descricao",
-        "unidade": "unidade", "unid": "unidade", "quantidade": "quantidade", "qtd": "quantidade",
-        "valor_unitario": "valor_unitario", "preco_unitario": "valor_unitario", "valor_unit": "valor_unitario",
-        "valor_total": "valor_total", "preco_total": "valor_total",
-    }
+    rename_map = {"item": "item", "descricao": "descricao", "desc": "descricao", "unidade": "unidade", "unid": "unidade", "quantidade": "quantidade", "qtd": "quantidade", "valor_unitario": "valor_unitario", "preco_unitario": "valor_unitario", "valor_unit": "valor_unitario", "valor_total": "valor_total", "preco_total": "valor_total"}
     df = df.rename(columns={c: next((v for k, v in rename_map.items() if c.startswith(k)), c) for c in df.columns})
     for col in ["quantidade", "valor_unitario"]:
         if col not in df.columns: raise ValueError(f"Coluna obrigatória '{col}' não encontrada.")
@@ -176,7 +179,10 @@ def preparar_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 def _garantir_tabelas():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
+    try:
+        cursor.execute("DROP INDEX IF EXISTS idx_item_padrao")
+    except Exception as e:
+        print(f"Não foi possível remover o índice antigo (pode não existir mais): {e}")
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS itens_orcamento (
         id INTEGER PRIMARY KEY AUTOINCREMENT, descricao TEXT, unidade TEXT,
@@ -184,7 +190,6 @@ def _garantir_tabelas():
         nome_obra TEXT, arquivo_original TEXT, importado_em TIMESTAMP,
         nome_cliente TEXT
     )""")
-    
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS mapa_itens (
         id_mapa INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -193,7 +198,6 @@ def _garantir_tabelas():
         peso_item REAL,
         id_grupo INTEGER REFERENCES grupos_servico(id_grupo)
     )""")
-    
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS observacoes_obra (
         id_observacao INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,13 +205,11 @@ def _garantir_tabelas():
         texto_observacao TEXT NOT NULL,
         data_criacao TIMESTAMP
     )""")
-
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS grupos_servico (
         id_grupo INTEGER PRIMARY KEY AUTOINCREMENT,
         nome_grupo TEXT UNIQUE NOT NULL
     )""")
-    
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS base_custos (
         id_custo INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -221,25 +223,16 @@ def _garantir_tabelas():
         codigo_composicao TEXT,
         numero_manual TEXT
     )""")
-
     try: cursor.execute("SELECT codigo_composicao FROM base_custos LIMIT 1")
     except sqlite3.OperationalError: cursor.execute("ALTER TABLE base_custos ADD COLUMN codigo_composicao TEXT")
-    
     try: cursor.execute("SELECT numero_manual FROM base_custos LIMIT 1")
     except sqlite3.OperationalError: cursor.execute("ALTER TABLE base_custos ADD COLUMN numero_manual TEXT")
-
     try: cursor.execute("SELECT peso_item FROM mapa_itens LIMIT 1")
     except sqlite3.OperationalError: cursor.execute("ALTER TABLE mapa_itens ADD COLUMN peso_item REAL")
-    
     try: cursor.execute("SELECT id_grupo FROM mapa_itens LIMIT 1")
     except sqlite3.OperationalError: cursor.execute("ALTER TABLE mapa_itens ADD COLUMN id_grupo INTEGER REFERENCES grupos_servico(id_grupo)")
-    
     try: cursor.execute("SELECT nome_cliente FROM itens_orcamento LIMIT 1")
     except sqlite3.OperationalError: cursor.execute("ALTER TABLE itens_orcamento ADD COLUMN nome_cliente TEXT")
-
-    try: conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_item_padrao ON mapa_itens(item_padrao)")
-    except Exception: pass
-    
     conn.commit()
     conn.close()
 
@@ -282,8 +275,8 @@ def salvar_mapeamento(descricao_original: str, item_padrao: str, grupo: str = No
     cursor = conn.cursor()
     id_grupo = None
     if grupo:
+        # CORREÇÃO: Passando a conexão existente
         id_grupo = adicionar_grupo(conn, grupo)
-    
     cursor.execute("""
         INSERT INTO mapa_itens (descricao_original, item_padrao, id_grupo)
         VALUES (?, ?, ?)
@@ -291,12 +284,10 @@ def salvar_mapeamento(descricao_original: str, item_padrao: str, grupo: str = No
         item_padrao=excluded.item_padrao,
         id_grupo=excluded.id_grupo
     """, (descricao_original, item_padrao, id_grupo))
-    
     if peso_item is not None:
         cursor.execute("""
             UPDATE mapa_itens SET peso_item = ? WHERE item_padrao = ?
         """, (peso_item, item_padrao))
-
     conn.commit()
     conn.close()
 
@@ -406,11 +397,12 @@ def obter_grupos_e_descricoes() -> dict:
         "Comunicação Visual e Sinalização": "Instalação de placas de sinalização, adesivos, películas decorativas e logotipos."
     }
 
+# CORREÇÃO 1: A função agora recebe a conexão existente para evitar lock.
 def adicionar_grupo(conn: sqlite3.Connection, nome_grupo: str) -> int:
     """Adiciona um novo grupo de serviço usando uma conexão existente."""
     cursor = conn.cursor()
     cursor.execute("INSERT OR IGNORE INTO grupos_servico (nome_grupo) VALUES (?)", (nome_grupo,))
-    conn.commit()
+    # O commit é tratado pela função que chama esta.
     cursor.execute("SELECT id_grupo FROM grupos_servico WHERE nome_grupo = ?", (nome_grupo,))
     resultado = cursor.fetchone()
     return resultado[0] if resultado else None
@@ -422,7 +414,7 @@ def salvar_custo_em_lote(df_custos: pd.DataFrame, mapeamento_grupos: dict, limpa
         cursor = conn.cursor()
         if limpar_base_existente:
             cursor.execute("DELETE FROM base_custos")
-            cursor.execute("DELETE FROM mapa_itens")
+            cursor.execute("DELETE FROM mapa_itens") # Também limpa os mapeamentos associados
 
         for _, row in df_custos.iterrows():
             item_padrao = row['item_padrao_nome']
@@ -447,16 +439,21 @@ def salvar_custo_em_lote(df_custos: pd.DataFrame, mapeamento_grupos: dict, limpa
             """, dados_custo)
 
             grupo_nome = mapeamento_grupos.get(item_padrao)
+            # CORREÇÃO 2: Passando a conexão 'conn' para a função adicionar_grupo.
             id_grupo = adicionar_grupo(conn, grupo_nome) if grupo_nome else None
             
             peso_item = row.get('peso_item')
 
+            # Garante que o item_padrao seja mapeado para si mesmo na tabela de mapas
             cursor.execute("""
                 INSERT OR REPLACE INTO mapa_itens (descricao_original, item_padrao, id_grupo, peso_item)
                 VALUES (?, ?, ?, ?)
             """, (item_padrao, item_padrao, id_grupo, peso_item))
 
         conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e # Relança a exceção para ser tratada pela interface do Streamlit
     finally:
         conn.close()
 
@@ -588,19 +585,23 @@ def consultar_dados_rentabilidade() -> pd.DataFrame:
 
         df_final['margem_bruta_rs'] = df_final['preco_venda_medio'] - df_final['custo_total_unitario']
         
-        df_final['margem_bruta_perc'] = (df_final['margem_bruta_rs'] / df_final['preco_venda_medio']).replace([np.inf, -np.inf], 0) * 100
+        # Evita divisão por zero se o preço de venda for zero
+        df_final['margem_bruta_perc'] = (df_final['margem_bruta_rs'] / df_final['preco_venda_medio'].replace(0, np.nan)).replace([np.inf, -np.inf], 0) * 100
         
-        df_final['preco_venda_medio'].fillna(0, inplace=True)
-        df_final['num_orcamentos'].fillna(0, inplace=True)
-        df_final['margem_bruta_rs'].fillna(0, inplace=True)
-        df_final['margem_bruta_perc'].fillna(0, inplace=True)
-        df_final['nome_grupo'].fillna('Sem Grupo', inplace=True)
+        df_final.fillna({
+            'preco_venda_medio': 0,
+            'num_orcamentos': 0,
+            'margem_bruta_rs': 0,
+            'margem_bruta_perc': 0,
+            'nome_grupo': 'Sem Grupo'
+        }, inplace=True)
 
         colunas_ordenadas = [
             'item_padrao', 'nome_grupo', 'unidade_de_medida', 'custo_total_unitario', 
             'preco_venda_medio', 'num_orcamentos', 'margem_bruta_rs', 'margem_bruta_perc'
         ]
-        df_final = df_final[colunas_ordenadas]
+        # Garante que todas as colunas existam antes de reordenar
+        df_final = df_final.reindex(columns=colunas_ordenadas, fill_value=0)
 
         conn.close()
         return df_final
@@ -608,23 +609,3 @@ def consultar_dados_rentabilidade() -> pd.DataFrame:
     except Exception as e:
         print(f"Erro ao consultar dados de rentabilidade: {e}")
         return pd.DataFrame()
-
-# --- NOVA FUNÇÃO PARA LIMPAR O HISTÓRICO DE PREÇOS ---
-def limpar_historico_precos():
-    """Apaga todos os registros da tabela itens_orcamento e do mapa_itens."""
-    _garantir_tabelas()
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        # Apaga os orçamentos importados
-        cursor.execute("DELETE FROM itens_orcamento")
-        # Apaga também o mapa de itens, pois ele é construído a partir dos orçamentos
-        cursor.execute("DELETE FROM mapa_itens WHERE descricao_original NOT IN (SELECT item_padrao_nome FROM base_custos)")
-        conn.commit()
-        print("Histórico de preços (itens_orcamento) e mapeamentos associados foram limpos com sucesso.")
-        return True
-    except Exception as e:
-        print(f"Erro ao limpar histórico de preços: {e}")
-        return False
-    finally:
-        conn.close()
